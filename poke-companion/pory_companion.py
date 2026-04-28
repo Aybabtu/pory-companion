@@ -7,10 +7,13 @@ import psutil
 from datetime import datetime
 
 SCRIPT_DIR  = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-GIF_FRONT   = os.path.join(SCRIPT_DIR, "pory.gif")
-GIF_BACK    = os.path.join(SCRIPT_DIR, "pory B.gif")
+GIF_FRONT        = os.path.join(SCRIPT_DIR, "pory.gif")
+GIF_BACK         = os.path.join(SCRIPT_DIR, "pory B.gif")
+GIF_SHINY_FRONT  = os.path.join(SCRIPT_DIR, "S_pory.gif")
+GIF_SHINY_BACK   = os.path.join(SCRIPT_DIR, "S_pory B.gif")
 BUDEW_FRONT = os.path.join(SCRIPT_DIR, "budew.gif")
 BUDEW_BACK  = os.path.join(SCRIPT_DIR, "budew B.gif")
+TIMER_BG    = os.path.join(SCRIPT_DIR, "timerBG.png")
 SIZE        = (100, 100)
 LOCK_PORT   = 47291
 
@@ -24,7 +27,7 @@ FONT_ENTRY    = ("Comic Sans MS", 10)
 FONT_WEATHER  = ("Comic Sans MS", 9)
 
 # Bubble geometry
-BW, BH  = 230, 165   # body width / height
+BW, BH  = 230, 115   # body width / height (used by input bubbles; ChatBubble sizes itself)
 TAIL_H  = 18
 TAIL_X  = 185
 PAD     = 3
@@ -108,6 +111,20 @@ def draw_bubble(canvas, bw, bh, tail_h, tail_x, pad, r):
     pts = _bubble_polygon(bw, bh, tail_h, tail_x, pad, r)
     canvas.create_polygon(pts, fill=BUBBLE_BG, outline=BUBBLE_BORDER,
                           width=2, smooth=False, tags="bubble")
+
+
+def clamp_window_pos(win, x, y):
+    """Clamp (x, y) so the window stays fully on-screen across all monitors."""
+    win.update_idletasks()
+    w = win.winfo_reqwidth()
+    h = win.winfo_reqheight()
+    vx = ctypes.windll.user32.GetSystemMetrics(76)
+    vy = ctypes.windll.user32.GetSystemMetrics(77)
+    vw = ctypes.windll.user32.GetSystemMetrics(78)
+    vh = ctypes.windll.user32.GetSystemMetrics(79)
+    x  = max(vx, min(x, vx + vw - w))
+    y  = max(vy, min(y, vy + vh - h))
+    return x, y
 
 
 def draw_bubble_down(canvas, bw, bh, tail_h, pad, r):
@@ -398,12 +415,12 @@ class TCGSearchBubble:
 
         self.canvas.create_text(
             PAD + BW // 2, PAD + 18,
-            text="Enter card name & number:",
+            text="Enter card name:",
             font=FONT_LABEL, fill=BUBBLE_FG,
         )
         self.canvas.create_text(
             PAD + BW // 2, PAD + 38,
-            text='e.g. "Snorunt 046/217"',
+            text='ex. Snorunt',
             font=("Comic Sans MS", 8), fill="#777755",
         )
 
@@ -421,6 +438,7 @@ class TCGSearchBubble:
 
         bx = companion_xy[0] - (PAD + TAIL_X + 20)
         by = companion_xy[1] - total_h
+        bx, by = clamp_window_pos(self.win, bx, by)
         self.win.geometry(f"+{bx}+{by}")
 
     def _on_focus_out(self, event):
@@ -447,11 +465,11 @@ class TCGSearchBubble:
             pass
 
 
-# ── Chat bubble with option buttons ───────────────────────────────────────────
+# ── Timer input bubble ────────────────────────────────────────────────────────
 
-class ChatBubble:
-    def __init__(self, parent_root, actions):
-        """actions: list of (label, callback)"""
+class TimerInputBubble:
+    def __init__(self, parent_root, on_submit, companion_xy):
+        self.on_submit = on_submit
         total_h = PAD * 2 + BH + TAIL_H + 2
 
         self.win = tk.Toplevel(parent_root)
@@ -468,12 +486,165 @@ class ChatBubble:
 
         self.canvas.create_text(
             PAD + BW // 2, PAD + 18,
+            text="How many minutes?",
+            font=FONT_LABEL, fill=BUBBLE_FG,
+        )
+        self.canvas.create_text(
+            PAD + BW // 2, PAD + 38,
+            text='ex. 50',
+            font=("Comic Sans MS", 8), fill="#777755",
+        )
+
+        vcmd = (parent_root.register(lambda s: s.isdigit() or s == ""), "%P")
+        self.entry = tk.Entry(self.win, font=FONT_ENTRY, relief="flat",
+                              bg="#ffffff", fg=BUBBLE_FG, insertbackground=BUBBLE_FG,
+                              width=10, highlightthickness=1,
+                              highlightbackground="#aaaaaa",
+                              highlightcolor="#666666",
+                              validate="key", validatecommand=vcmd)
+        self.canvas.create_window(PAD + BW // 2, PAD + 75, window=self.entry)
+        self.entry.focus_set()
+
+        self.entry.bind("<Return>", self._submit)
+        self.entry.bind("<Escape>", lambda e: self.close())
+        self.win.bind("<FocusOut>", self._on_focus_out)
+
+        bx = companion_xy[0] - (PAD + TAIL_X + 20)
+        by = companion_xy[1] - total_h
+        bx, by = clamp_window_pos(self.win, bx, by)
+        self.win.geometry(f"+{bx}+{by}")
+
+    def _on_focus_out(self, event):
+        self.win.after(150, self._check_focus)
+
+    def _check_focus(self):
+        try:
+            focused = self.win.focus_get()
+        except Exception:
+            focused = None
+        if focused is None:
+            self.close()
+
+    def _submit(self, event=None):
+        minutes = self.entry.get().strip()
+        self.close()
+        if minutes and self.on_submit:
+            self.on_submit(minutes)
+
+    def close(self):
+        try:
+            self.win.destroy()
+        except Exception:
+            pass
+
+
+# ── Pokédex input bubble ──────────────────────────────────────────────────────
+
+class PokedexInputBubble:
+    def __init__(self, parent_root, on_submit, companion_xy):
+        self.on_submit = on_submit
+        total_h = PAD * 2 + BH + TAIL_H + 2
+
+        self.win = tk.Toplevel(parent_root)
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        self.win.attributes("-transparentcolor", BG)
+        self.win.configure(bg=BG)
+        self.win.resizable(False, False)
+
+        self.canvas = tk.Canvas(self.win, width=PAD * 2 + BW + 2,
+                                height=total_h, bg=BG, highlightthickness=0)
+        self.canvas.pack()
+        draw_bubble(self.canvas, BW, BH, TAIL_H, TAIL_X, PAD, R)
+
+        self.canvas.create_text(
+            PAD + BW // 2, PAD + 18,
+            text="Which Pokémon?",
+            font=FONT_LABEL, fill=BUBBLE_FG,
+        )
+        self.canvas.create_text(
+            PAD + BW // 2, PAD + 38,
+            text='ex. Snorunt',
+            font=("Comic Sans MS", 8), fill="#777755",
+        )
+
+        self.entry = tk.Entry(self.win, font=FONT_ENTRY, relief="flat",
+                              bg="#ffffff", fg=BUBBLE_FG, insertbackground=BUBBLE_FG,
+                              width=24, highlightthickness=1,
+                              highlightbackground="#aaaaaa",
+                              highlightcolor="#666666")
+        self.canvas.create_window(PAD + BW // 2, PAD + 75, window=self.entry)
+        self.entry.focus_set()
+
+        self.entry.bind("<Return>", self._submit)
+        self.entry.bind("<Escape>", lambda e: self.close())
+        self.win.bind("<FocusOut>", self._on_focus_out)
+
+        bx = companion_xy[0] - (PAD + TAIL_X + 20)
+        by = companion_xy[1] - total_h
+        bx, by = clamp_window_pos(self.win, bx, by)
+        self.win.geometry(f"+{bx}+{by}")
+
+    def _on_focus_out(self, event):
+        self.win.after(150, self._check_focus)
+
+    def _check_focus(self):
+        try:
+            focused = self.win.focus_get()
+        except Exception:
+            focused = None
+        if focused is None:
+            self.close()
+
+    def _submit(self, event=None):
+        name = self.entry.get().strip()
+        self.close()
+        if name and self.on_submit:
+            self.on_submit(name)
+
+    def close(self):
+        try:
+            self.win.destroy()
+        except Exception:
+            pass
+
+
+# ── Chat bubble with option buttons ───────────────────────────────────────────
+
+class ChatBubble:
+    LABEL_H  = 40   # px reserved for the prompt text at top
+    BTN_H    = 34   # px per button (height + padding)
+    BTN_TOP  = 12   # gap between label bottom and first button
+    BODY_PAD = 14   # padding below last button
+
+    def __init__(self, parent_root, actions):
+        """actions: list of (label, callback). Height is computed from content."""
+        n          = len(actions)
+        body_h     = self.LABEL_H + self.BTN_TOP + n * self.BTN_H + self.BODY_PAD
+        total_h    = PAD * 2 + body_h + TAIL_H + 2
+        btn_cy     = PAD + self.LABEL_H + self.BTN_TOP + (n * self.BTN_H) // 2
+        self._body_h = body_h
+
+        self.win = tk.Toplevel(parent_root)
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        self.win.attributes("-transparentcolor", BG)
+        self.win.configure(bg=BG)
+        self.win.resizable(False, False)
+
+        self.canvas = tk.Canvas(self.win, width=PAD * 2 + BW + 2,
+                                height=total_h, bg=BG, highlightthickness=0)
+        self.canvas.pack()
+        draw_bubble(self.canvas, BW, body_h, TAIL_H, TAIL_X, PAD, R)
+
+        self.canvas.create_text(
+            PAD + BW // 2, PAD + 18,
             text="What would we like to do today?",
             font=FONT_LABEL, fill=BUBBLE_FG,
         )
 
         btn_frame = tk.Frame(self.win, bg=BUBBLE_BG)
-        self.canvas.create_window(PAD + BW // 2, PAD + 100, window=btn_frame)
+        self.canvas.create_window(PAD + BW // 2, btn_cy, window=btn_frame)
 
         for label, cb in actions:
             btn = tk.Button(
@@ -490,8 +661,10 @@ class ChatBubble:
         self.win.bind("<FocusOut>", self._on_focus_out)
 
     def position_near(self, px, py):
+        total_h = PAD * 2 + self._body_h + TAIL_H + 2
         bx = px - (PAD + TAIL_X + 20)
-        by = py - (PAD * 2 + BH + TAIL_H + 2)
+        by = py - total_h
+        bx, by = clamp_window_pos(self.win, bx, by)
         self.win.geometry(f"+{bx}+{by}")
 
     def _on_focus_out(self, event):
@@ -526,16 +699,24 @@ class PoryCompanion:
         self.label.pack()
 
         self.facing_front      = True
+        self._shiny            = False
         self.frames_front      = load_frames(GIF_FRONT)
-        self.frames_front_flip = load_frames(GIF_FRONT, flip=True)
+        self.frames_front_flip = load_frames(GIF_FRONT,       flip=True)
         self.frames_back       = load_frames(GIF_BACK)
-        self.frames_back_flip  = load_frames(GIF_BACK,  flip=True)
+        self.frames_back_flip  = load_frames(GIF_BACK,        flip=True)
+        self.frames_shiny_front      = load_frames(GIF_SHINY_FRONT)
+        self.frames_shiny_front_flip = load_frames(GIF_SHINY_FRONT, flip=True)
+        self.frames_shiny_back       = load_frames(GIF_SHINY_BACK)
+        self.frames_shiny_back_flip  = load_frames(GIF_SHINY_BACK,  flip=True)
         self.frame_index       = 0
         self._bubble           = None
         self._weather_win      = None
+        self._child_procs      = []
 
-        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-        root.geometry(f"+{sw - 130}+{sh // 2}")
+        # Position just above the taskbar in the lower-right of the primary monitor
+        work = ctypes.wintypes.RECT()
+        ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(work), 0)
+        root.geometry(f"+{work.right - SIZE[0]}+{work.bottom - SIZE[1]}")
 
         self.label.bind("<ButtonPress-1>",   self._drag_start)
         self.label.bind("<B1-Motion>",       self._drag_motion)
@@ -545,6 +726,7 @@ class PoryCompanion:
         self._drag_x = self._drag_y = 0
         self._dragging = False
         self._glancing = False
+        self._pinned   = False
         self._roaming  = False
         self._roam_tx  = 0
         self._roam_ty  = 0
@@ -564,10 +746,12 @@ class PoryCompanion:
     def _frames(self):
         if self._roaming:
             if self._roam_dir == "right":
-                return self.frames_front_flip
+                return self.frames_shiny_front_flip if self._shiny else self.frames_front_flip
             else:
-                return self.frames_back_flip
-        return self.frames_front if self.facing_front else self.frames_back
+                return self.frames_shiny_back_flip  if self._shiny else self.frames_back_flip
+        if self.facing_front:
+            return self.frames_shiny_front if self._shiny else self.frames_front
+        return self.frames_shiny_back if self._shiny else self.frames_back
 
     def _animate(self):
         frames = self._frames
@@ -617,7 +801,7 @@ class PoryCompanion:
 
     def _start_roam(self):
         try:
-            if self._dragging:
+            if self._dragging or self._pinned:
                 self._schedule_roam()
                 return
             vx, vy, vw, vh = self._virtual_screen()
@@ -686,6 +870,8 @@ class PoryCompanion:
                 ("🌤 Weather",        self._show_weather),
                 ("❓ Who's That?",   self._show_pokemon),
                 ("💰 Card Prices",   self._show_tcg_search),
+                ("⏱ Tournament Timer", self._show_timer),
+                ("📖 Pokédex",         self._show_pokedex),
             ]
             self._bubble = ChatBubble(self.root, actions)
             self._bubble.position_near(self.root.winfo_x(), self.root.winfo_y())
@@ -694,9 +880,32 @@ class PoryCompanion:
     def _clear_bubble(self):
         self._bubble = None
 
+    def _toggle_shiny(self):
+        self._shiny = not self._shiny
+        self.frame_index = 0
+
+    def _toggle_pin(self):
+        self._pinned = not self._pinned
+        if self._pinned:
+            self._roaming = False   # stop any active roam immediately
+
+    def _quit(self):
+        for p in self._child_procs:
+            try:
+                p.terminate()
+            except Exception:
+                pass
+        self.root.destroy()
+
     def _on_right_click(self, event):
         menu = tk.Menu(self.root, tearoff=0, font=("Comic Sans MS", 10))
-        menu.add_command(label="Quit", command=self.root.destroy)
+        shiny_label = "✨ Normal Form" if self._shiny else "✨ Shiny Form"
+        menu.add_command(label=shiny_label, command=self._toggle_shiny)
+        menu.add_separator()
+        pin_label = "Unpin" if self._pinned else "Pin"
+        menu.add_command(label=pin_label, command=self._toggle_pin)
+        menu.add_separator()
+        menu.add_command(label="Quit", command=self._quit)
         menu.tk_popup(event.x_root, event.y_root)
 
     # ── Weather ──────────────────────────────────────────────────────────────
@@ -744,9 +953,10 @@ class PoryCompanion:
     # ── Who's That Pokémon ────────────────────────────────────────────────────
 
     def _show_pokemon(self):
-        subprocess.Popen([sys.executable, __file__, "--pokemon"],
-                         creationflags=subprocess.CREATE_NO_WINDOW
-                         if sys.platform == "win32" else 0)
+        p = subprocess.Popen([sys.executable, __file__, "--pokemon"],
+                             creationflags=subprocess.CREATE_NO_WINDOW
+                             if sys.platform == "win32" else 0)
+        self._child_procs.append(p)
 
     # ── TCG Card Prices ───────────────────────────────────────────────────────
 
@@ -755,10 +965,37 @@ class PoryCompanion:
                         companion_xy=(self.root.winfo_x(), self.root.winfo_y()))
 
     def _launch_tcg_lookup(self, query):
-        subprocess.Popen(
+        p = subprocess.Popen(
             [sys.executable, __file__, "--tcg", query],
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
+        self._child_procs.append(p)
+
+    # ── Tournament Timer ──────────────────────────────────────────────────────
+
+    def _show_timer(self):
+        TimerInputBubble(self.root, on_submit=self._launch_timer,
+                         companion_xy=(self.root.winfo_x(), self.root.winfo_y()))
+
+    def _launch_timer(self, minutes):
+        p = subprocess.Popen(
+            [sys.executable, __file__, "--timer", minutes],
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        self._child_procs.append(p)
+
+    # ── Pokédex ───────────────────────────────────────────────────────────────
+
+    def _show_pokedex(self):
+        PokedexInputBubble(self.root, on_submit=self._launch_pokedex,
+                           companion_xy=(self.root.winfo_x(), self.root.winfo_y()))
+
+    def _launch_pokedex(self, name):
+        p = subprocess.Popen(
+            [sys.executable, __file__, "--pokedex", name],
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        self._child_procs.append(p)
 
 
 # ── Pokémon game window (runs as subprocess) ───────────────────────────────────
@@ -880,6 +1117,228 @@ def run_tcg_lookup(query):
     webview.start()
 
 
+# ── Tournament timer window (runs as subprocess) ───────────────────────────────
+
+def run_timer(minutes):
+    total_secs = int(minutes) * 60
+
+    work = ctypes.wintypes.RECT()
+    ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(work), 0)
+    WW = (work.right  - work.left) // 2
+    WH = (work.bottom - work.top)  // 2
+
+    root = tk.Tk()
+    root.title(f"Tournament Timer — {minutes} min")
+    root.geometry(f"{WW}x{WH}")
+    root.resizable(True, True)
+    root.attributes("-topmost", True)
+
+    # ── Background ────────────────────────────────────────────────────────────
+    src_img  = Image.open(TIMER_BG).convert("RGBA")
+    src_w, src_h = src_img.size
+
+    def make_bg(w, h):
+        """Fit src_img into (w, h) keeping aspect ratio; centre on black canvas at 80% opacity."""
+        scale   = min(w / src_w, h / src_h)
+        new_w   = int(src_w * scale)
+        new_h   = int(src_h * scale)
+        resized = src_img.resize((new_w, new_h), Image.LANCZOS)
+        # Fade to 80% by scaling the alpha channel
+        r, g, b, a = resized.split()
+        a = a.point(lambda p: int(p * 0.80))
+        resized = Image.merge("RGBA", (r, g, b, a))
+        canvas_img = Image.new("RGBA", (w, h), (0, 0, 0, 255))
+        ox = (w - new_w) // 2
+        oy = (h - new_h) // 2
+        canvas_img.paste(resized, (ox, oy), resized)
+        return ImageTk.PhotoImage(canvas_img)
+
+    bg_photo = make_bg(WW, WH)
+
+    canvas = tk.Canvas(root, width=WW, height=WH, highlightthickness=0, bd=0,
+                       bg="black")
+    canvas.pack(fill="both", expand=True)
+    bg_item = canvas.create_image(0, 0, anchor="nw", image=bg_photo)
+    canvas.bg_photo = bg_photo
+
+    # ── State ─────────────────────────────────────────────────────────────────
+    state = {
+        "remaining": total_secs,
+        "running":   False,
+        "paused":    False,
+        "after_id":  None,
+    }
+
+    # ── Timer display ─────────────────────────────────────────────────────────
+    font_size  = WH // 5
+    timer_font = ("Arial Black", font_size, "bold")
+    cx, cy     = WW // 2, int(WH * 0.75)
+    outline    = max(3, font_size // 18)
+
+    def fmt():
+        m, s = divmod(state["remaining"], 60)
+        return f"{m:02d}:{s:02d}"
+
+    def draw_timer():
+        canvas.delete("timer")
+        t = fmt()
+        for dx in range(-outline, outline + 1):
+            for dy in range(-outline, outline + 1):
+                if dx == 0 and dy == 0:
+                    continue
+                canvas.create_text(cx + dx, cy + dy, text=t,
+                                   font=timer_font, fill="white", tags="timer")
+        canvas.create_text(cx, cy, text=t,
+                           font=timer_font, fill="black", tags="timer")
+
+    draw_timer()
+
+    # ── Tick ──────────────────────────────────────────────────────────────────
+    def tick():
+        if state["running"] and not state["paused"]:
+            if state["remaining"] > 0:
+                state["remaining"] -= 1
+                draw_timer()
+                state["after_id"] = root.after(1000, tick)
+            else:
+                state["running"] = False
+                update_buttons()
+
+    # ── Controls ──────────────────────────────────────────────────────────────
+    def start_stop():
+        if state["running"]:
+            state["running"] = False
+            state["paused"]  = False
+            if state["after_id"]:
+                root.after_cancel(state["after_id"])
+        else:
+            if state["remaining"] > 0:
+                state["running"]  = True
+                state["paused"]   = False
+                state["after_id"] = root.after(1000, tick)
+        update_buttons()
+
+    def pause():
+        if not state["running"]:
+            return
+        state["paused"] = not state["paused"]
+        if state["paused"]:
+            if state["after_id"]:
+                root.after_cancel(state["after_id"])
+        else:
+            state["after_id"] = root.after(1000, tick)
+        update_buttons()
+
+    def reset():
+        state["running"]   = False
+        state["paused"]    = False
+        if state["after_id"]:
+            root.after_cancel(state["after_id"])
+        state["remaining"] = total_secs
+        draw_timer()
+        update_buttons()
+
+    # ── Buttons ───────────────────────────────────────────────────────────────
+    btn_font = ("Arial Black", max(10, WH // 22), "bold")
+
+    btn_frame = tk.Frame(canvas, bg="#1a1a1a", padx=6, pady=6)
+    canvas.create_window(WW // 2, int(WH * 0.18), window=btn_frame, tags="buttons")
+
+    start_btn = tk.Button(btn_frame, text="▶  Start", font=btn_font,
+                          fg="white", bg="#2a7a40", activeforeground="white",
+                          activebackground="#1f5c30", relief="flat",
+                          padx=18, pady=8, command=start_stop)
+    start_btn.grid(row=0, column=0, padx=8)
+
+    pause_btn = tk.Button(btn_frame, text="⏸  Pause", font=btn_font,
+                          fg="white", bg="#a07010", activeforeground="white",
+                          activebackground="#7a5510", relief="flat",
+                          padx=18, pady=8, command=pause)
+    pause_btn.grid(row=0, column=1, padx=8)
+
+    reset_btn = tk.Button(btn_frame, text="↺  Reset", font=btn_font,
+                          fg="white", bg="#3a3a6a", activeforeground="white",
+                          activebackground="#2a2a50", relief="flat",
+                          padx=18, pady=8, command=reset)
+    reset_btn.grid(row=0, column=2, padx=8)
+
+    def update_buttons():
+        if state["running"]:
+            start_btn.config(text="⏹  Stop",  bg="#8a2020", activebackground="#6a1818")
+            pause_btn.config(bg="#a07010" if not state["paused"] else "#606010",
+                             activebackground="#7a5510")
+        else:
+            start_btn.config(text="▶  Start", bg="#2a7a40", activebackground="#1f5c30")
+            pause_btn.config(bg="#555555", activebackground="#444444")
+
+    update_buttons()
+
+    # Redraw background + timer on resize
+    def on_resize(event):
+        nonlocal bg_photo, WW, WH, cx, cy, font_size, timer_font, outline, btn_font
+        WW, WH   = event.width, event.height
+        cx, cy   = WW // 2, int(WH * 0.75)
+        font_size  = WH // 5
+        timer_font = ("Arial Black", font_size, "bold")
+        outline    = max(3, font_size // 18)
+        bg_photo = make_bg(WW, WH)
+        canvas.itemconfig(bg_item, image=bg_photo)
+        canvas.bg_photo = bg_photo
+        canvas.coords(bg_item, 0, 0)
+        canvas.coords("buttons", WW // 2, int(WH * 0.18))
+        btn_font = ("Arial Black", max(10, WH // 22), "bold")
+        for b in (start_btn, pause_btn, reset_btn):
+            b.config(font=btn_font)
+        draw_timer()
+
+    canvas.bind("<Configure>", on_resize)
+    root.mainloop()
+
+
+# ── Pokédex window (runs as subprocess) ───────────────────────────────────────
+
+def run_pokedex(name):
+    import webview, urllib.parse
+
+    slug = name.strip().lower().replace(" ", "-")
+    url  = f"https://pokemondb.net/pokedex/{urllib.parse.quote(slug)}"
+
+    work = ctypes.wintypes.RECT()
+    ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(work), 0)
+    w_width  = (work.right  - work.left) // 2
+    w_height = (work.bottom - work.top)  // 2
+
+    INJECT_JS = """
+    (function() {
+        var s = document.createElement('style');
+        s.textContent = `
+            #site-header, .site-footer, .ad-unit,
+            .foobar-banner, #js-donation-banner { display: none !important; }
+            body { padding-top: 0 !important; }
+        `;
+        document.head.appendChild(s);
+    })();
+    """
+
+    w = webview.create_window(
+        f"Pokédex — {name.title()}",
+        url,
+        width=w_width,
+        height=w_height,
+        resizable=True,
+    )
+
+    def on_loaded():
+        import time; time.sleep(1)
+        try:
+            w.evaluate_js(INJECT_JS)
+        except Exception:
+            pass
+
+    w.events.loaded += on_loaded
+    webview.start()
+
+
 def main():
     if "--pokemon" in sys.argv:
         run_pokemon_game()
@@ -890,6 +1349,19 @@ def main():
         query = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else ""
         if query:
             run_tcg_lookup(query)
+        return
+
+    if "--timer" in sys.argv:
+        idx = sys.argv.index("--timer")
+        minutes = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else "50"
+        run_timer(minutes)
+        return
+
+    if "--pokedex" in sys.argv:
+        idx = sys.argv.index("--pokedex")
+        name = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else ""
+        if name:
+            run_pokedex(name)
         return
 
     lock = acquire_lock()
