@@ -74,7 +74,7 @@ FONT_ENTRY    = ("Comic Sans MS", 10)
 FONT_WEATHER  = ("Comic Sans MS", 9)
 
 # ── Version / update ───────────────────────────────────────────────────────────
-VERSION     = "1.0.1"
+VERSION     = "1.0.2"
 GITHUB_REPO = "Aybabtu/pory-companion"
 
 # Bubble geometry
@@ -1123,19 +1123,35 @@ class PoryCompanion:
             pc.coords(bar, 0, 0, int(w * frac), 12)
             lbl.config(text=f"Downloading update… {int(frac * 100)}%")
 
-        def _apply():
-            """Write a self-deleting batch file that swaps the exe after Pory exits."""
+        def _apply(total, done):
+            # Verify the download is complete before touching anything
+            if total and done != total:
+                lbl.config(
+                    text=f"Download incomplete ({done}/{total} bytes). Please try again.",
+                    fg="#ff6666"
+                )
+                try:
+                    os.remove(new_path)
+                except OSError:
+                    pass
+                return
+
+            # Use 'ping 127.0.0.1 -n 6' as a ~5-second delay.
+            # 'timeout' requires a visible console window; ping works in any context.
+            exe_dir = os.path.dirname(exe_path)
             bat = tempfile.NamedTemporaryFile(
-                suffix=".bat", delete=False, mode="w", encoding="utf-8"
+                suffix=".bat", delete=False, mode="w",
+                encoding="utf-8", dir=exe_dir
             )
             bat.write(
                 "@echo off\n"
-                "timeout /t 2 /nobreak > NUL\n"
+                f'ping 127.0.0.1 -n 6 > NUL\n'
                 f'move /y "{new_path}" "{exe_path}"\n'
                 f'start "" "{exe_path}"\n'
-                "del \"%~f0\"\n"
+                'del "%~f0"\n'
             )
             bat.close()
+            # Run with a normal (hidden) window — ping needs no interaction
             subprocess.Popen(
                 ["cmd.exe", "/c", bat.name],
                 creationflags=subprocess.CREATE_NO_WINDOW,
@@ -1160,7 +1176,7 @@ class PoryCompanion:
                             done += len(chunk)
                             if total:
                                 self.root.after(0, lambda fr=done/total: _update_bar(fr))
-                self.root.after(0, _apply)
+                self.root.after(0, lambda: _apply(total, done))
             except Exception as e:
                 self.root.after(0, lambda: lbl.config(
                     text=f"Download failed: {e}", fg="#ff6666"
