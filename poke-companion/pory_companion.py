@@ -14,7 +14,8 @@ GIF_SHINY_FRONT  = os.path.join(SCRIPT_DIR, "S_pory.gif")
 GIF_SHINY_BACK   = os.path.join(SCRIPT_DIR, "S_pory B.gif")
 BUDEW_FRONT = os.path.join(SCRIPT_DIR, "budew.gif")
 BUDEW_BACK  = os.path.join(SCRIPT_DIR, "budew B.gif")
-TIMER_BG    = os.path.join(SCRIPT_DIR, "timerBG.png")
+TIMER_BG        = os.path.join(SCRIPT_DIR, "timerBG.png")
+TIMER_END_SFX   = os.path.join(SCRIPT_DIR, "timer_end.mp3")
 
 # ── Music album catalogue (khinsider slugs) ────────────────────────────────────
 # Each entry maps the display name to one or more album slugs on khinsider.
@@ -73,7 +74,7 @@ FONT_ENTRY    = ("Comic Sans MS", 10)
 FONT_WEATHER  = ("Comic Sans MS", 9)
 
 # ── Version / update ───────────────────────────────────────────────────────────
-VERSION     = "1.0.0"
+VERSION     = "1.0.1"
 GITHUB_REPO = "Aybabtu/pory-companion"
 
 # Bubble geometry
@@ -1454,6 +1455,9 @@ def run_timer(minutes):
         "running":   False,
         "paused":    False,
         "after_id":  None,
+        "ended":     False,
+        "shake_dx":  0,
+        "shake_dy":  0,
     }
 
     # ── Timer display ─────────────────────────────────────────────────────────
@@ -1469,16 +1473,51 @@ def run_timer(minutes):
     def draw_timer():
         canvas.delete("timer")
         t = fmt()
+        fill  = "#dd0000" if state["ended"] else "black"
+        sdx   = state["shake_dx"]
+        sdy   = state["shake_dy"]
         for dx in range(-outline, outline + 1):
             for dy in range(-outline, outline + 1):
                 if dx == 0 and dy == 0:
                     continue
-                canvas.create_text(cx + dx, cy + dy, text=t,
+                canvas.create_text(cx + sdx + dx, cy + sdy + dy, text=t,
                                    font=timer_font, fill="white", tags="timer")
-        canvas.create_text(cx, cy, text=t,
-                           font=timer_font, fill="black", tags="timer")
+        canvas.create_text(cx + sdx, cy + sdy, text=t,
+                           font=timer_font, fill=fill, tags="timer")
 
     draw_timer()
+
+    # ── Timer-end: sound × 2 + shake ─────────────────────────────────────────
+    def on_timer_end():
+        state["running"] = False
+        state["ended"]   = True
+        update_buttons()
+
+        # Play timer_end.mp3 twice in a background thread
+        def _play():
+            try:
+                import pygame
+                pygame.mixer.init()
+                snd = pygame.mixer.Sound(TIMER_END_SFX)
+                snd.play()
+                time.sleep(snd.get_length() + 0.15)
+                snd.play()
+            except Exception:
+                pass
+        threading.Thread(target=_play, daemon=True).start()
+
+        # Shake animation — 60 frames × 50 ms ≈ 3 seconds
+        def shake(n):
+            if n > 0:
+                state["shake_dx"] = random.randint(-9, 9)
+                state["shake_dy"] = random.randint(-6, 6)
+                draw_timer()
+                root.after(50, lambda: shake(n - 1))
+            else:
+                state["shake_dx"] = 0
+                state["shake_dy"] = 0
+                draw_timer()   # settle at rest — stays red
+        shake(60)
 
     # ── Tick ──────────────────────────────────────────────────────────────────
     def tick():
@@ -1488,8 +1527,7 @@ def run_timer(minutes):
                 draw_timer()
                 state["after_id"] = root.after(1000, tick)
             else:
-                state["running"] = False
-                update_buttons()
+                on_timer_end()
 
     # ── Controls ──────────────────────────────────────────────────────────────
     def start_stop():
@@ -1519,6 +1557,9 @@ def run_timer(minutes):
     def reset():
         state["running"]   = False
         state["paused"]    = False
+        state["ended"]     = False
+        state["shake_dx"]  = 0
+        state["shake_dy"]  = 0
         if state["after_id"]:
             root.after_cancel(state["after_id"])
         state["remaining"] = total_secs
