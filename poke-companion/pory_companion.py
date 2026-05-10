@@ -74,7 +74,7 @@ FONT_ENTRY    = ("Comic Sans MS", 10)
 FONT_WEATHER  = ("Comic Sans MS", 9)
 
 # ── Version / update ───────────────────────────────────────────────────────────
-VERSION     = "1.0.2"
+VERSION     = "1.0.3"
 GITHUB_REPO = "Aybabtu/pory-companion"
 
 # Bubble geometry
@@ -1194,6 +1194,8 @@ class PoryCompanion:
 
     def _on_right_click(self, event):
         menu = tk.Menu(self.root, tearoff=0, font=("Comic Sans MS", 10))
+        menu.add_command(label=f"Pory  v{VERSION}", state="disabled")
+        menu.add_separator()
         shiny_label = "✨ Normal Form" if self._shiny else "✨ Shiny Form"
         menu.add_command(label=shiny_label, command=self._toggle_shiny)
         menu.add_separator()
@@ -1435,7 +1437,6 @@ def run_timer(minutes):
     root.title(f"Tournament Timer — {minutes} min")
     root.geometry(f"{WW}x{WH}")
     root.resizable(True, True)
-    root.attributes("-topmost", True)
 
     # ── Background ────────────────────────────────────────────────────────────
     src_img  = Image.open(TIMER_BG).convert("RGBA")
