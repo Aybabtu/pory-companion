@@ -74,7 +74,7 @@ FONT_ENTRY    = ("Comic Sans MS", 10)
 FONT_WEATHER  = ("Comic Sans MS", 9)
 
 # ── Version / update ───────────────────────────────────────────────────────────
-VERSION     = "1.0.3"
+VERSION     = "1.0.4"
 GITHUB_REPO = "Aybabtu/pory-companion"
 
 # Bubble geometry
@@ -1468,13 +1468,14 @@ def run_timer(minutes):
 
     # ── State ─────────────────────────────────────────────────────────────────
     state = {
-        "remaining": total_secs,
-        "running":   False,
-        "paused":    False,
-        "after_id":  None,
-        "ended":     False,
-        "shake_dx":  0,
-        "shake_dy":  0,
+        "remaining":  total_secs,
+        "running":    False,
+        "paused":     False,
+        "after_id":   None,
+        "ended":      False,
+        "shake_dx":   0,
+        "shake_dy":   0,
+        "fullscreen": False,
     }
 
     # ── Timer display ─────────────────────────────────────────────────────────
@@ -1583,6 +1584,36 @@ def run_timer(minutes):
         draw_timer()
         update_buttons()
 
+    # ── Fullscreen ────────────────────────────────────────────────────────────
+    def exit_fullscreen():
+        if state["fullscreen"]:
+            state["fullscreen"] = False
+            root.attributes("-fullscreen", False)
+            fs_btn.config(text="⛶  Full Screen")
+
+    def toggle_fullscreen():
+        state["fullscreen"] = not state["fullscreen"]
+        root.attributes("-fullscreen", state["fullscreen"])
+        fs_btn.config(
+            text="✕  Exit Full Screen" if state["fullscreen"] else "⛶  Full Screen"
+        )
+
+    def _on_focus_out(event):
+        # Only react when the root window itself loses focus to another app
+        if state["fullscreen"]:
+            root.after(150, _check_fs_focus)
+
+    def _check_fs_focus():
+        try:
+            focused = root.focus_get()
+        except Exception:
+            focused = None
+        if focused is None:
+            exit_fullscreen()
+
+    root.bind("<Escape>",   lambda e: exit_fullscreen())
+    root.bind("<FocusOut>", _on_focus_out)
+
     # ── Buttons ───────────────────────────────────────────────────────────────
     btn_font = ("Arial Black", max(10, WH // 22), "bold")
 
@@ -1606,6 +1637,12 @@ def run_timer(minutes):
                           activebackground="#2a2a50", relief="flat",
                           padx=18, pady=8, command=reset)
     reset_btn.grid(row=0, column=2, padx=8)
+
+    fs_btn = tk.Button(btn_frame, text="⛶  Full Screen", font=btn_font,
+                       fg="white", bg="#4a2a6a", activeforeground="white",
+                       activebackground="#361e50", relief="flat",
+                       padx=18, pady=8, command=toggle_fullscreen)
+    fs_btn.grid(row=1, column=0, columnspan=3, pady=(6, 0))
 
     def update_buttons():
         if state["running"]:
@@ -1632,7 +1669,7 @@ def run_timer(minutes):
         canvas.coords(bg_item, 0, 0)
         canvas.coords("buttons", WW // 2, int(WH * 0.18))
         btn_font = ("Arial Black", max(10, WH // 22), "bold")
-        for b in (start_btn, pause_btn, reset_btn):
+        for b in (start_btn, pause_btn, reset_btn, fs_btn):
             b.config(font=btn_font)
         draw_timer()
 
