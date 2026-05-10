@@ -74,7 +74,7 @@ FONT_ENTRY    = ("Comic Sans MS", 10)
 FONT_WEATHER  = ("Comic Sans MS", 9)
 
 # ── Version / update ───────────────────────────────────────────────────────────
-VERSION     = "1.0.4"
+VERSION     = "1.0.5"
 GITHUB_REPO = "Aybabtu/pory-companion"
 
 # Bubble geometry
@@ -1136,8 +1136,10 @@ class PoryCompanion:
                     pass
                 return
 
-            # Use 'ping 127.0.0.1 -n 6' as a ~5-second delay.
-            # 'timeout' requires a visible console window; ping works in any context.
+            # Swap the file after Pory exits — do NOT auto-launch.
+            # Launching via batch script bypasses the Explorer/Defender pre-clearance
+            # that a normal double-click gets, causing python313.dll to fail mid-extraction.
+            # The user relaunching manually works exactly like a fresh install.
             exe_dir = os.path.dirname(exe_path)
             bat = tempfile.NamedTemporaryFile(
                 suffix=".bat", delete=False, mode="w",
@@ -1145,19 +1147,23 @@ class PoryCompanion:
             )
             bat.write(
                 "@echo off\n"
-                f'ping 127.0.0.1 -n 6 > NUL\n'
+                "ping 127.0.0.1 -n 6 > NUL\n"
                 f'move /y "{new_path}" "{exe_path}"\n'
-                f'start "" "{exe_path}"\n'
                 'del "%~f0"\n'
             )
             bat.close()
-            # Run with a normal (hidden) window — ping needs no interaction
             subprocess.Popen(
                 ["cmd.exe", "/c", bat.name],
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
-            win.destroy()
-            self._quit()
+
+            # Show confirmation then quit — user reopens Pory themselves
+            lbl.config(
+                text="✅  Update applied!\nReopen Pory to start the new version.",
+                fg="#88ff88"
+            )
+            win.geometry(f"{W}x{H + 20}+{(win.winfo_screenwidth()-W)//2}+{(win.winfo_screenheight()-H)//2}")
+            win.after(4000, lambda: (win.destroy(), self._quit()))
 
         def _download():
             try:
