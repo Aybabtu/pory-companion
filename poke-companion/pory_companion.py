@@ -1648,6 +1648,7 @@ def run_timer(minutes):
                        fg="white", bg="#4a2a6a", activeforeground="white",
                        activebackground="#361e50", relief="flat",
                        padx=18, pady=8, command=toggle_fullscreen)
+    # Moved from row=1 (its own row below controls) to row=0 col=3 so it sits alongside Start/Pause/Reset
     fs_btn.grid(row=0, column=3, padx=8)
 
     def update_buttons():
