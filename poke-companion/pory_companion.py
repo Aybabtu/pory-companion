@@ -74,7 +74,7 @@ FONT_ENTRY    = ("Comic Sans MS", 10)
 FONT_WEATHER  = ("Comic Sans MS", 9)
 
 # ── Version / update ───────────────────────────────────────────────────────────
-VERSION     = "1.0.6"
+VERSION     = "1.0.7"
 GITHUB_REPO = "Aybabtu/pory-companion"
 
 # Bubble geometry
@@ -1621,35 +1621,34 @@ def run_timer(minutes):
     root.bind("<FocusOut>", _on_focus_out)
 
     # ── Buttons ───────────────────────────────────────────────────────────────
-    btn_font = ("Arial Black", max(10, WH // 22), "bold")
+    btn_font = ("Arial", max(8, WH // 32))
 
-    btn_frame = tk.Frame(canvas, bg="#1a1a1a", padx=6, pady=6)
-    canvas.create_window(WW // 2, int(WH * 0.18), window=btn_frame, tags="buttons")
+    btn_frame = tk.Frame(canvas, bg="#1a1a1a", padx=4, pady=4)
+    canvas.create_window(WW // 2, 30, window=btn_frame, anchor="n", tags="buttons")
 
-    start_btn = tk.Button(btn_frame, text="▶  Start", font=btn_font,
+    start_btn = tk.Button(btn_frame, text="▶ Start", font=btn_font,
                           fg="white", bg="#2a7a40", activeforeground="white",
                           activebackground="#1f5c30", relief="flat",
-                          padx=18, pady=8, command=start_stop)
-    start_btn.grid(row=0, column=0, padx=8)
+                          padx=8, pady=4, command=start_stop)
+    start_btn.grid(row=0, column=0, padx=4)
 
-    pause_btn = tk.Button(btn_frame, text="⏸  Pause", font=btn_font,
+    pause_btn = tk.Button(btn_frame, text="⏸ Pause", font=btn_font,
                           fg="white", bg="#a07010", activeforeground="white",
                           activebackground="#7a5510", relief="flat",
-                          padx=18, pady=8, command=pause)
-    pause_btn.grid(row=0, column=1, padx=8)
+                          padx=8, pady=4, command=pause)
+    pause_btn.grid(row=0, column=1, padx=4)
 
-    reset_btn = tk.Button(btn_frame, text="↺  Reset", font=btn_font,
+    reset_btn = tk.Button(btn_frame, text="↺ Reset", font=btn_font,
                           fg="white", bg="#3a3a6a", activeforeground="white",
                           activebackground="#2a2a50", relief="flat",
-                          padx=18, pady=8, command=reset)
-    reset_btn.grid(row=0, column=2, padx=8)
+                          padx=8, pady=4, command=reset)
+    reset_btn.grid(row=0, column=2, padx=4)
 
-    fs_btn = tk.Button(btn_frame, text="⛶  Full Screen", font=btn_font,
+    fs_btn = tk.Button(btn_frame, text="⛶ Full Screen", font=btn_font,
                        fg="white", bg="#4a2a6a", activeforeground="white",
                        activebackground="#361e50", relief="flat",
-                       padx=18, pady=8, command=toggle_fullscreen)
-    # Moved from row=1 (its own row below controls) to row=0 col=3 so it sits alongside Start/Pause/Reset
-    fs_btn.grid(row=0, column=3, padx=8)
+                       padx=8, pady=4, command=toggle_fullscreen)
+    fs_btn.grid(row=0, column=3, padx=4)
 
     def update_buttons():
         if state["running"]:
@@ -1674,8 +1673,8 @@ def run_timer(minutes):
         canvas.itemconfig(bg_item, image=bg_photo)
         canvas.bg_photo = bg_photo
         canvas.coords(bg_item, 0, 0)
-        canvas.coords("buttons", WW // 2, int(WH * 0.18))
-        btn_font = ("Arial Black", max(10, WH // 22), "bold")
+        canvas.coords("buttons", WW // 2, 30)
+        btn_font = ("Arial", max(8, WH // 32))
         for b in (start_btn, pause_btn, reset_btn, fs_btn):
             b.config(font=btn_font)
         draw_timer()
@@ -1741,7 +1740,13 @@ def run_music_player():
         return
 
     KHI = "https://downloads.khinsider.com"
-    UA  = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    # Full browser-like headers — the site 403s on stripped-down User-Agents
+    UA  = {
+        "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "identity",
+    }
 
     # ── Scraping helpers ───────────────────────────────────────────────────────
 
@@ -1771,18 +1776,19 @@ def run_music_player():
         url  = KHI + "/game-soundtracks/album/" + urllib.parse.quote(slug, safe="-_.")
         page = fetch(url)
         tracks = []
-        # Split into <tr> blocks; each track row contains a .mp3 detail-page link
+        # Split into <tr> blocks; each track row contains a .mp3 detail-page link.
+        # Each row now has multiple <a> tags pointing to the same .mp3 path
+        # (name, duration, size).  Match only the name cell: the <td> with class
+        # "clickable-row" that has NO align="right" attribute on it.
         for row in re.split(r'(?=<tr[\s>])', page, flags=re.IGNORECASE):
             m = re.search(
-                r'href="(/game-soundtracks/album/[^"]+\.mp3)"[^>]*>(.*?)</a>',
-                row, re.IGNORECASE | re.DOTALL,
+                r'<td class="clickable-row"><a href="(/game-soundtracks/album/[^"]+\.mp3)">([^<]+)</a>',
+                row, re.IGNORECASE,
             )
             if not m:
                 continue
             path = m.group(1)
-            name = _html_unescape.unescape(
-                re.sub(r'<[^>]+>', '', m.group(2)).strip()
-            )
+            name = _html_unescape.unescape(m.group(2).strip())
             if not name:
                 continue
             # Duration (M:SS or MM:SS) appears in the cells after the track link
