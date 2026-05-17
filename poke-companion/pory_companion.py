@@ -74,7 +74,7 @@ FONT_ENTRY    = ("Comic Sans MS", 10)
 FONT_WEATHER  = ("Comic Sans MS", 9)
 
 # ── Version / update ───────────────────────────────────────────────────────────
-VERSION     = "1.0.5"
+VERSION     = "1.0.6"
 GITHUB_REPO = "Aybabtu/pory-companion"
 
 # Bubble geometry
