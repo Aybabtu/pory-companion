@@ -7,13 +7,17 @@ import ctypes, ctypes.wintypes
 import psutil
 from datetime import datetime
 
-SCRIPT_DIR  = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-GIF_FRONT        = os.path.join(SCRIPT_DIR, "pory.gif")
-GIF_BACK         = os.path.join(SCRIPT_DIR, "pory B.gif")
-GIF_SHINY_FRONT  = os.path.join(SCRIPT_DIR, "S_pory.gif")
-GIF_SHINY_BACK   = os.path.join(SCRIPT_DIR, "S_pory B.gif")
-BUDEW_FRONT = os.path.join(SCRIPT_DIR, "budew.gif")
-BUDEW_BACK  = os.path.join(SCRIPT_DIR, "budew B.gif")
+SCRIPT_DIR   = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+POKEMON_DIR  = os.path.join(SCRIPT_DIR, "pokemon")
+ULTRA_BALL   = os.path.join(SCRIPT_DIR, "Ultra Ball.png")
+
+# Resolved at startup by pick_pokemon(); defaults kept for safety
+GIF_FRONT        = os.path.join(POKEMON_DIR, "porygon.gif")
+GIF_BACK         = os.path.join(POKEMON_DIR, "porygon B.gif")
+GIF_SHINY_FRONT  = os.path.join(POKEMON_DIR, "S_pory.gif")
+GIF_SHINY_BACK   = os.path.join(POKEMON_DIR, "S_pory B.gif")
+BUDEW_FRONT = os.path.join(POKEMON_DIR, "budew.gif")
+BUDEW_BACK  = os.path.join(POKEMON_DIR, "budew B.gif")
 TIMER_BG        = os.path.join(SCRIPT_DIR, "timerBG.png")
 TIMER_END_SFX   = os.path.join(SCRIPT_DIR, "timer_end.mp3")
 
@@ -792,8 +796,10 @@ class ChatBubble:
 # ── Main companion ─────────────────────────────────────────────────────────────
 
 class PoryCompanion:
-    def __init__(self, root):
+    def __init__(self, root, has_shiny=True, can_roam=True):
         self.root = root
+        self._has_shiny = has_shiny
+        self._can_roam  = can_roam
         root.overrideredirect(True)
         root.attributes("-topmost", True)
         root.attributes("-transparentcolor", BG)
@@ -908,7 +914,7 @@ class PoryCompanion:
 
     def _start_roam(self):
         try:
-            if self._dragging or self._pinned:
+            if not self._can_roam or self._dragging or self._pinned:
                 self._schedule_roam()
                 return
             vx, vy, vw, vh = self._virtual_screen()
@@ -987,6 +993,25 @@ class PoryCompanion:
 
     def _clear_bubble(self):
         self._bubble = None
+
+    def _choose_companion(self):
+        chosen = pick_pokemon(master=self.root)
+        if not chosen:
+            return
+        global GIF_FRONT, GIF_BACK, GIF_SHINY_FRONT, GIF_SHINY_BACK
+        GIF_FRONT, GIF_BACK, GIF_SHINY_FRONT, GIF_SHINY_BACK, can_roam = resolve_gif_paths(chosen)
+        self._can_roam  = can_roam
+        self._has_shiny = GIF_SHINY_FRONT != GIF_FRONT
+        self._shiny     = False
+        self.frames_front            = load_frames(GIF_FRONT)
+        self.frames_front_flip       = load_frames(GIF_FRONT,       flip=True)
+        self.frames_back             = load_frames(GIF_BACK)
+        self.frames_back_flip        = load_frames(GIF_BACK,        flip=True)
+        self.frames_shiny_front      = load_frames(GIF_SHINY_FRONT)
+        self.frames_shiny_front_flip = load_frames(GIF_SHINY_FRONT, flip=True)
+        self.frames_shiny_back       = load_frames(GIF_SHINY_BACK)
+        self.frames_shiny_back_flip  = load_frames(GIF_SHINY_BACK,  flip=True)
+        self.frame_index = 0
 
     def _toggle_shiny(self):
         self._shiny = not self._shiny
@@ -1202,9 +1227,12 @@ class PoryCompanion:
         menu = tk.Menu(self.root, tearoff=0, font=("Comic Sans MS", 10))
         menu.add_command(label=f"Pory  v{VERSION}", state="disabled")
         menu.add_separator()
-        shiny_label = "✨ Normal Form" if self._shiny else "✨ Shiny Form"
-        menu.add_command(label=shiny_label, command=self._toggle_shiny)
+        menu.add_command(label="Choose Companion", command=self._choose_companion)
         menu.add_separator()
+        if self._has_shiny:
+            shiny_label = "✨ Normal Form" if self._shiny else "✨ Shiny Form"
+            menu.add_command(label=shiny_label, command=self._toggle_shiny)
+            menu.add_separator()
         pin_label = "Unpin" if self._pinned else "Pin"
         menu.add_command(label=pin_label, command=self._toggle_pin)
         menu.add_separator()
@@ -2122,6 +2150,189 @@ def run_music_player():
     root.mainloop()
 
 
+def resolve_gif_paths(name):
+    """Return (front, back, shiny_front, shiny_back, can_roam) for a pokemon base name.
+
+    If a {name}_M.gif exists in the pokemon folder, it is used as the front animation
+    and can_roam is True.  Without it the sprite stays stationary.
+    """
+    m_front  = os.path.join(POKEMON_DIR, f"{name}_M.gif")
+    can_roam = os.path.exists(m_front)
+    front = m_front if can_roam else os.path.join(POKEMON_DIR, f"{name}.gif")
+    _back_m = os.path.join(POKEMON_DIR, f"{name} B_M.gif")
+    _back   = os.path.join(POKEMON_DIR, f"{name} B.gif")
+    if os.path.exists(_back_m):
+        back = _back_m
+    elif os.path.exists(_back):
+        back = _back
+    else:
+        back = front
+    for _sf in (f"S_{name}_M.gif", f"S_{name}.gif"):
+        _p = os.path.join(POKEMON_DIR, _sf)
+        if os.path.exists(_p):
+            s_front = _p
+            break
+    else:
+        s_front = front
+    for _sb in (f"S_{name} B_M.gif", f"S_{name} B.gif"):
+        _p = os.path.join(POKEMON_DIR, _sb)
+        if os.path.exists(_p):
+            s_back = _p
+            break
+    else:
+        s_back = s_front
+    return front, back, s_front, s_back, can_roam
+
+
+def pick_pokemon(master=None):
+    """Show Ultra Ball splash → click → pokemon selector. Returns chosen base name.
+
+    Pass master=<Tk widget> to run as a modal Toplevel inside an existing mainloop.
+    Omit (or pass None) to run as a standalone Tk window with its own mainloop.
+    """
+    import glob as _glob
+
+    # Discover selectable pokemon: skip shiny (S_) and back ( B / B_M) variants.
+    # Strip _M suffix to get the canonical name so pokemon that only have a
+    # moving variant still appear in the list.
+    gifs = _glob.glob(os.path.join(POKEMON_DIR, "*.gif"))
+    seen = set()
+    names = []
+    for p in gifs:
+        base = os.path.splitext(os.path.basename(p))[0]
+        if base.startswith("S_"):
+            continue
+        if base.endswith(" B") or base.endswith(" B_M"):
+            continue
+        canonical = base[:-2] if base.endswith("_M") else base
+        if canonical not in seen:
+            seen.add(canonical)
+            names.append(canonical)
+    names.sort()
+
+    chosen = [None]
+
+    if master is None:
+        root = tk.Tk()
+    else:
+        root = tk.Toplevel(master)
+    root.overrideredirect(True)
+    root.attributes("-topmost", True)
+    root.configure(bg="#1a1a2e")
+
+    # Centre the window on screen
+    root.update_idletasks()
+    sw = root.winfo_screenwidth()
+    sh = root.winfo_screenheight()
+
+    def _centre(w, h):
+        root.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+
+    # ── Phase 1: Ultra Ball splash ─────────────────────────────────────────────
+    BALL_SIZE = 160
+    try:
+        img = Image.open(ULTRA_BALL).convert("RGBA").resize(
+            (BALL_SIZE, BALL_SIZE), Image.LANCZOS
+        )
+        ball_photo = ImageTk.PhotoImage(img)
+    except Exception:
+        ball_photo = None
+
+    _centre(BALL_SIZE + 40, BALL_SIZE + 60)
+
+    splash_frame = tk.Frame(root, bg="#1a1a2e")
+    splash_frame.pack(fill="both", expand=True)
+
+    tk.Label(
+        splash_frame, text="Choose your companion!",
+        font=("Comic Sans MS", 11, "bold"), bg="#1a1a2e", fg="#eaeaea", pady=8,
+    ).pack()
+
+    if ball_photo:
+        ball_lbl = tk.Label(splash_frame, image=ball_photo, bg="#1a1a2e", cursor="hand2")
+        ball_lbl.image = ball_photo
+        ball_lbl.pack(pady=(0, 12))
+    else:
+        ball_lbl = tk.Label(
+            splash_frame, text="⚾  Click to choose", bg="#1a1a2e", fg="#eaeaea",
+            font=("Comic Sans MS", 14), cursor="hand2",
+        )
+        ball_lbl.pack(pady=(0, 12))
+
+    # ── Phase 2: Pokemon list (replaces splash) ────────────────────────────────
+    def show_list():
+        splash_frame.destroy()
+
+        WIN_W    = 240
+        ROW_H    = 44
+        MAX_ROWS = 6
+        HDR_H    = 50
+        PAD_V    = 12
+
+        visible  = min(len(names), MAX_ROWS)
+        list_h   = visible * ROW_H + PAD_V * 2
+        win_h    = HDR_H + list_h
+        _centre(WIN_W, win_h)
+
+        outer = tk.Frame(root, bg="#1a1a2e")
+        outer.pack(fill="both", expand=True)
+
+        tk.Label(
+            outer, text="Choose your companion!",
+            font=("Comic Sans MS", 11, "bold"), bg="#1a1a2e", fg="#eaeaea", pady=8,
+        ).pack()
+
+        # Scrollable area
+        scroll_frame = tk.Frame(outer, bg="#1a1a2e")
+        scroll_frame.pack(fill="both", expand=True, padx=16, pady=(0, PAD_V))
+
+        sb = tk.Scrollbar(scroll_frame, orient="vertical", bg="#0f3460",
+                          troughcolor="#1a1a2e", activebackground="#e94560")
+        canvas = tk.Canvas(scroll_frame, bg="#1a1a2e", highlightthickness=0,
+                           height=list_h, yscrollcommand=sb.set)
+        sb.config(command=canvas.yview)
+
+        # Only show scrollbar when there are more entries than visible rows
+        if len(names) > MAX_ROWS:
+            sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        inner = tk.Frame(canvas, bg="#1a1a2e")
+        canvas_win = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _on_inner_resize(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            canvas.itemconfig(canvas_win, width=canvas.winfo_width())
+
+        inner.bind("<Configure>", _on_inner_resize)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_win, width=e.width))
+        canvas.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
+
+        for name in names:
+            display = name.replace("-", " ").title()
+            b = tk.Button(
+                inner, text=display,
+                font=("Comic Sans MS", 11, "bold"),
+                fg="#eaeaea", bg="#0f3460",
+                activeforeground="#eaeaea", activebackground="#e94560",
+                relief="flat", pady=6,
+                command=lambda n=name: _pick(n),
+            )
+            b.pack(fill="x", pady=3, padx=4)
+            b.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
+
+    def _pick(name):
+        chosen[0] = name
+        root.destroy()
+
+    ball_lbl.bind("<Button-1>", lambda e: show_list())
+    if master is None:
+        root.mainloop()
+    else:
+        master.wait_window(root)
+    return chosen[0]
+
+
 def main():
     if "--pokemon" in sys.argv:
         run_pokemon_game()
@@ -2151,10 +2362,20 @@ def main():
         run_music_player()
         return
 
+    chosen = pick_pokemon()
+    if not chosen:
+        return  # user closed the picker without selecting
+
+    global GIF_FRONT, GIF_BACK, GIF_SHINY_FRONT, GIF_SHINY_BACK, BUDEW_FRONT, BUDEW_BACK
+    GIF_FRONT, GIF_BACK, GIF_SHINY_FRONT, GIF_SHINY_BACK, can_roam = resolve_gif_paths(chosen)
+    # Budew always comes from the pokemon folder regardless of selection
+    BUDEW_FRONT = os.path.join(POKEMON_DIR, "budew.gif")
+    BUDEW_BACK  = os.path.join(POKEMON_DIR, "budew B.gif")
+
     lock = acquire_lock()
     root = tk.Tk()
     root.after(0, lambda: root.bind("<Destroy>", lambda e: lock.close()))
-    PoryCompanion(root)
+    PoryCompanion(root, has_shiny=(GIF_SHINY_FRONT != GIF_FRONT), can_roam=can_roam)
     root.mainloop()
 
 
